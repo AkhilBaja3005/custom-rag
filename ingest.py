@@ -82,27 +82,44 @@ class MultiParserIngestionEngine:
                 if meta:
                     content += "\n[Metadata & Form Fields]\n" + "\n".join(meta)
 
-            words = content.split()
+            # Semantic Sentence Boundary Chunking:
+            # Splits text at natural sentence boundaries (.!?) rather than hard token cuts
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+', content)
+            
             chunks = []
-            # Parent-Child Hierarchical Chunking:
-            # Parent Block = 500 words (for rich LLM generation context)
-            # Child Chunk = 150 words (for precise vector similarity matching)
-            parent_step = 450
-            for i in range(0, len(words), parent_step):
-                parent_words = words[i : i + 500]
-                parent_text = context_header + " ".join(parent_words)
-                
-                # Split parent block into smaller 150-word child chunks
-                child_step = 120
-                for j in range(0, len(parent_words), child_step):
-                    child_words = parent_words[j : j + 150]
-                    if len(child_words) > 20:
-                        child_text = context_header + " ".join(child_words)
-                        chunks.append({
-                            "text": child_text,         # Used for vector embedding & BM25
-                            "parent_text": parent_text,  # Stored in payload & fed to LLM for rich context
-                            "page": page_num + 1
-                        })
+            curr_words = []
+            curr_len = 0
+            
+            for sentence in sentences:
+                s_words = sentence.split()
+                if not s_words:
+                    continue
+                if curr_len + len(s_words) > 450:
+                    parent_text = context_header + " ".join(curr_words)
+                    # Create 150-word semantic child window
+                    child_words = curr_words[:150]
+                    child_text = context_header + " ".join(child_words)
+                    chunks.append({
+                        "text": child_text,
+                        "parent_text": parent_text,
+                        "page": page_num + 1
+                    })
+                    # Keep overlap for continuity
+                    curr_words = curr_words[300:] + s_words
+                    curr_len = len(curr_words)
+                else:
+                    curr_words.extend(s_words)
+                    curr_len += len(s_words)
+                    
+            if curr_words and len(curr_words) > 20:
+                parent_text = context_header + " ".join(curr_words)
+                child_text = context_header + " ".join(curr_words[:150])
+                chunks.append({
+                    "text": child_text,
+                    "parent_text": parent_text,
+                    "page": page_num + 1
+                })
             return chunks
         except Exception:
             return []
