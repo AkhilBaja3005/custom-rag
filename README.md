@@ -24,8 +24,8 @@ The system is decoupled into an async **FastAPI REST/SSE Microservice Backend** 
 ```mermaid
 flowchart TD
     subgraph Layer 1: Vision-Native VLM Ingestion & Leiden Clustering
-        A[PDF Documents - up to 100k+ Pages] --> B[PyMuPDF Page Image Renderer]
-        B --> C[VisionNativeColPaliParser Gemini VLM Page Patch Parsing]
+        A[PDF Documents - up to 100k+ Pages] --> B[PyMuPDF fitz High-Res Page Image Renderer - 150 DPI]
+        B --> C[VisionNativeColPaliParser Gemini VLM Page Patch Parsing vision_parser.py]
         C --> D[Semantic Sentence Boundary Chunker]
         D --> E[Local Dense Embedder: BAAI/bge-small-en-v1.5]
         D --> F[LeidenCommunityGraphRAG leiden_graph.py]
@@ -35,7 +35,7 @@ flowchart TD
     subgraph Layer 2: Adaptive Next-Gen Retrieval & Caching
         H[User Query Input] --> I[Security Prompt Injection Firewall]
         I --> J[Sub-1ms Semantic Vector Cache diskcache]
-        J -- Cache Miss --> K[Adaptive Intent Query Router]
+        J -- Cache Miss --> K[Adaptive Intent Query Router nextgen_rag.py]
         K --> L[HyDE Query Generator]
         K --> M[Dense Vector Search: BAAI/bge-small-en-v1.5]
         K --> N[Sparse Keyword Search: Rank-BM25]
@@ -46,7 +46,7 @@ flowchart TD
     end
 
     subgraph Layer 3: Context Compression, Self-RAG & Streaming UI
-        R & F --> S[LLMLingua2SelfRAGCompressor Token Compression]
+        R & F --> S[LLMLingua2SelfRAGCompressor Token Compression compressor_self_rag.py]
         S --> T[Self-RAG Reflection Token Directives: Relevant, Supported, Utility]
         T --> U[Gemini 3.1 Flash-Lite Zero-Extrapolation Answer Generator]
         U --> V[Next.js 15 Web App - SSE Token Streaming]
