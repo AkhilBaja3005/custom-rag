@@ -201,7 +201,7 @@ with st.sidebar:
                 status_text.markdown(f"**Processing Batch:** Pages `{start_page}` to `{end_page}` of `{total_pages}`...")
 
             try:
-                ingest_engine = MultiParserIngestionEngine(tmp_path, collection_name=target_col)
+                ingest_engine = MultiParserIngestionEngine(tmp_path, collection_name=target_col, qdrant_client=qclient)
                 stats = ingest_engine.process_pdf_streaming(progress_callback=progress_callback)
                 st.session_state.selected_collection = target_col
                 st.session_state.messages = []

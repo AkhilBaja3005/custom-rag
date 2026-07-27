@@ -26,7 +26,7 @@ from google.genai import types
 import config
 
 class MultiParserIngestionEngine:
-    def __init__(self, pdf_path: str, collection_name: str = config.COLLECTION_NAME, qdrant_path: str = config.QDRANT_PATH):
+    def __init__(self, pdf_path: str, collection_name: str = config.COLLECTION_NAME, qdrant_client: QdrantClient = None, qdrant_path: str = config.QDRANT_PATH):
         self.pdf_path = pdf_path
         self.collection_name = collection_name
         self.qdrant_path = qdrant_path
@@ -36,19 +36,25 @@ class MultiParserIngestionEngine:
         self.embedder = SentenceTransformer(config.EMBEDDING_MODEL_NAME, device=self.device)
         self.vector_dim = self.embedder.get_embedding_dimension()
         
-        self.qdrant = QdrantClient(path=self.qdrant_path)
+        if qdrant_client:
+            self.qdrant = qdrant_client
+        else:
+            self.qdrant = QdrantClient(path=self.qdrant_path)
+            
         self._init_qdrant_collection()
 
     def _init_qdrant_collection(self):
         collections = [c.name for c in self.qdrant.get_collections().collections]
         if self.collection_name not in collections:
+            from qdrant_client.models import HnswConfigDiff
             self.qdrant.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=self.vector_dim, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=self.vector_dim, distance=Distance.COSINE),
+                hnsw_config=HnswConfigDiff(m=16, ef_construct=100)  # SOTA HNSW Graph Indexing
             )
 
     def _extract_and_chunk_page(self, doc: fitz.Document, page_num: int):
-        """In-memory extraction and fast chunking for a single page."""
+        """In-memory extraction with Contextual Chunk Prepending."""
         try:
             page = doc[page_num]
             text = page.get_text("text")
@@ -56,6 +62,10 @@ class MultiParserIngestionEngine:
                 return []
                 
             content = text.strip()
+            # Contextual Header Prepending (Doc Name + Page Meta)
+            doc_name = os.path.basename(self.pdf_path)
+            context_header = f"[Doc: {doc_name} | Page {page_num + 1}]\n"
+            
             widgets = page.widgets()
             annots = page.annots()
             if widgets or annots:
@@ -74,14 +84,25 @@ class MultiParserIngestionEngine:
 
             words = content.split()
             chunks = []
-            step = 450
-            for i in range(0, len(words), step):
-                chunk_words = words[i : i + 500]
-                if len(chunk_words) > 30:
-                    chunks.append({
-                        "text": " ".join(chunk_words),
-                        "page": page_num + 1
-                    })
+            # Parent-Child Hierarchical Chunking:
+            # Parent Block = 500 words (for rich LLM generation context)
+            # Child Chunk = 150 words (for precise vector similarity matching)
+            parent_step = 450
+            for i in range(0, len(words), parent_step):
+                parent_words = words[i : i + 500]
+                parent_text = context_header + " ".join(parent_words)
+                
+                # Split parent block into smaller 150-word child chunks
+                child_step = 120
+                for j in range(0, len(parent_words), child_step):
+                    child_words = parent_words[j : j + 150]
+                    if len(child_words) > 20:
+                        child_text = context_header + " ".join(child_words)
+                        chunks.append({
+                            "text": child_text,         # Used for vector embedding & BM25
+                            "parent_text": parent_text,  # Stored in payload & fed to LLM for rich context
+                            "page": page_num + 1
+                        })
             return chunks
         except Exception:
             return []
@@ -124,6 +145,7 @@ class MultiParserIngestionEngine:
                         vector=emb.tolist(),
                         payload={
                             "text": chunk["text"],
+                            "parent_text": chunk.get("parent_text", chunk["text"]),
                             "page": chunk["page"],
                             "source_tag": f"[Source: Page {chunk['page']}]"
                         }
