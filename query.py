@@ -168,10 +168,14 @@ class RAGQueryEngine:
             }
 
         # Build context prompt using Parent Block context for rich LLM synthesis
-        formatted_context = ""
-        for idx, chunk in enumerate(context_chunks, 1):
-            block_text = chunk.get("parent_text", chunk["text"])
-            formatted_context += f"--- CONTEXT BLOCK {idx} [Source: Page {chunk['page']}] ---\n{block_text}\n\n"
+        context_blocks = []
+        for idx, c in enumerate(context_chunks, 1):
+            page_info = f"[Source: Page {c['page']}]" if c.get('page') else ""
+            # Prefer rich 500-word parent_text over 150-word child text for LLM generation
+            chunk_content = c.get("parent_text", c.get("text", ""))
+            context_blocks.append(f"--- CONTEXT BLOCK {idx} {page_info} ---\n{chunk_content}")
+
+        formatted_context = "\n\n".join(context_blocks)
 
         system_prompt = (
             "You are a strict, SOTA production-grade Retrieval-Augmented Generation assistant.\n"
