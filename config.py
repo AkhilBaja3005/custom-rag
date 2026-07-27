@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Device Configuration (MPS for Apple Silicon acceleration with CPU fallback)
-if torch.backends.mps.is_available():
+# Device Configuration (CUDA for NVIDIA, MPS for Apple Silicon, CPU fallback)
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif torch.backends.mps.is_available():
     DEVICE = "mps"
 else:
     DEVICE = "cpu"

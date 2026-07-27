@@ -160,10 +160,15 @@ class MultiParserIngestionEngine:
                 )
                 total_chunks_indexed += len(points)
 
-            # Explicit Garbage Collection & MPS Memory Flush to prevent macOS Kernel Panics
+            # Explicit Garbage Collection & GPU Memory Flush to prevent RAM/VRAM overflow
             import gc
             gc.collect()
-            if self.device == "mps":
+            if self.device == "cuda":
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            elif self.device == "mps":
                 try:
                     torch.mps.empty_cache()
                 except Exception:
