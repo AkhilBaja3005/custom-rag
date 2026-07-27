@@ -269,17 +269,18 @@ class RAGQueryEngine:
             except Exception:
                 pass
 
-        # 5. Non-Blocking Graph RAG Traversal
+        # 5. Hierarchical Community GraphRAG Traversal
         if route_info.get("use_graph", False):
             try:
-                from graph_rag import GraphRAGEngine
-                graph_engine = GraphRAGEngine()
-                # Fast graph query without heavy API extraction on live path
-                graph_context = graph_engine.query_graph_context(query)
-                if graph_context:
+                from community_graph import HierarchicalCommunityGraphRAG
+                comm_graph = HierarchicalCommunityGraphRAG()
+                comm_graph.build_hierarchical_communities(top_reranked, max_chunks=5)
+                comm_summary = comm_graph.query_community_summaries()
+                if comm_summary:
                     top_reranked.append({
                         "page": 0,
-                        "text": f"[Knowledge Graph Relationship Traversal]\n{graph_context}",
+                        "text": f"[Hierarchical Community GraphRAG Summary]\n{comm_summary}",
+                        "parent_text": f"[Hierarchical Community GraphRAG Summary]\n{comm_summary}",
                         "rerank_score": 9.99
                     })
             except Exception:
