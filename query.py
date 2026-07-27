@@ -215,11 +215,21 @@ class RAGQueryEngine:
             cached_res["is_cache_hit"] = True
             return cached_res
 
-        # 1. HyDE Query Expansion
+        # 1. HyDE Query Expansion (fallback to raw query if API call fails or times out)
         search_prompt = self.generate_hyde_query(query) if use_hyde else query
         
-        # 2. Hybrid Sparse BM25 + Dense Vector Search
+        # 2. Hybrid Dense Vector Search & BM25 Sparse Search
         vector_candidates = self.search_vector_candidates(search_prompt, collection_name=collection_name)
+        # Ensure BM25 also receives direct query candidates if HyDE shifted query terms
+        if search_prompt != query:
+            raw_vector_candidates = self.search_vector_candidates(query, collection_name=collection_name)
+            # Merge candidate pools deduplicated by point ID
+            seen_ids = {c["id"] for c in vector_candidates}
+            for candidate in raw_vector_candidates:
+                if candidate["id"] not in seen_ids:
+                    vector_candidates.append(candidate)
+                    seen_ids.add(candidate["id"])
+
         bm25_candidates = self.search_bm25_candidates(query, vector_candidates)
         
         # 3. Reciprocal Rank Fusion & Re-Ranking
