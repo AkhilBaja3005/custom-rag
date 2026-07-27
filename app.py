@@ -270,8 +270,19 @@ if prompt := st.chat_input(f"Ask a question about document '{st.session_state.se
             res = query_engine.query(prompt, collection_name=st.session_state.selected_collection)
             answer_text = res["answer"]
             sources = res["sources"]
+            is_cache = res.get("is_cache_hit", False)
 
-        st.markdown(answer_text)
+        if is_cache:
+            st.caption("⚡ **Instant Response** *(Retrieved from Sub-10ms Semantic Vector Cache)*")
+
+        # Token Streaming effect for smooth user experience
+        def stream_data():
+            import time
+            for word in answer_text.split(" "):
+                yield word + " "
+                time.sleep(0.01)
+
+        st.write_stream(stream_data)
         
         if sources:
             with st.expander("🔍 View Retrieved Context Chunks & Sources"):

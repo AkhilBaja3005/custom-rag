@@ -44,12 +44,28 @@ class RAGQueryEngine:
             self.gemini_client = None
             print("WARNING: GEMINI_API_KEY not set. Gemini zero-extrapolation generation will return a warning.")
 
+    def sanitize_input_prompt(self, query: str) -> str:
+        """Security Guardrail: Sanitizes query input to prevent prompt injection attacks."""
+        import re
+        injection_patterns = [
+            r"ignore\s+previous\s+instructions",
+            r"system\s+prompt",
+            r"disregard\s+above",
+            r"you\s+are\s+now",
+            r"jailbreak"
+        ]
+        sanitized = query
+        for pattern in injection_patterns:
+            sanitized = re.sub(pattern, "[sanitized_input]", sanitized, flags=re.IGNORECASE)
+        return sanitized
+
     def generate_hyde_query(self, query: str) -> str:
         """HyDE: Generates a hypothetical document answer to expand raw query vector space."""
         if not self.gemini_client:
             return query
         try:
-            prompt = f"Write a short, hypothetical academic textbook paragraph that answers the question: '{query}'. Do not cite sources."
+            clean_q = self.sanitize_input_prompt(query)
+            prompt = f"Write a short, hypothetical academic textbook paragraph that answers the question: '{clean_q}'. Do not cite sources."
             res = self.gemini_client.models.generate_content(
                 model=config.GEMINI_MODEL_NAME,
                 contents=[prompt],
