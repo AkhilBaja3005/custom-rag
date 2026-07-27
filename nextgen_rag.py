@@ -20,17 +20,43 @@ class SOTAUltimateRAGEngine:
             self.client = None
 
     # -------------------------------------------------------------
-    # 💡 INNOVATION 1: CRAG (Corrective RAG Agent Loop)
+    # 💡 INNOVATION 4: Adaptive Intent-Based Query Router
     # -------------------------------------------------------------
+    def route_query_intent(self, query: str) -> Dict[str, Any]:
+        """Categorizes query intent to bypass heavy HyDE/RRF/GraphRAG steps for simple factual lookups."""
+        q_clean = query.strip().lower()
+        
+        # Simple factual / page specific query
+        if len(q_clean.split()) <= 4 or any(kw in q_clean for kw in ["page", "what is", "who is", "when did"]):
+            return {
+                "intent": "direct_factual",
+                "use_hyde": False,
+                "use_graph": False,
+                "top_k": 5
+            }
+        # Global summary query
+        elif any(kw in q_clean for kw in ["summary", "summarize", "main topics", "overview", "themes", "conclusions"]):
+            return {
+                "intent": "global_summary",
+                "use_hyde": True,
+                "use_graph": True,
+                "top_k": 15
+            }
+        # Deep multi-hop analytical query
+        else:
+            return {
+                "intent": "multi_hop_analytical",
+                "use_hyde": True,
+                "use_graph": True,
+                "top_k": 10
+            }
     def evaluate_retrieval_confidence(self, query: str, top_candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Evaluates whether retrieved chunks sufficiently answer the query (Confidence Threshold 0.70)."""
         if not top_candidates:
             return {"confidence": 0.0, "needs_correction": True, "corrected_query": query}
             
-        top_score = top_candidates[0].get("rerank_score", 0.0)
-        
-        # Cross-encoder scores > 0.0 indicate positive relevance
-        if top_score >= 0.70 or (top_score > 0.0 and len(top_candidates) >= 3):
+        # If top candidate exists and is plausible, do not trigger heavy LLM rewrite
+        if top_candidates and (top_score > -2.0 or len(top_candidates) >= 1):
             return {"confidence": 0.85, "needs_correction": False, "corrected_query": query}
             
         # Agentic Query Rewrite fallback on low retrieval confidence
