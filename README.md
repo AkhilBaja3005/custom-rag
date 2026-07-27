@@ -12,7 +12,7 @@ A production-grade, local-first Retrieval-Augmented Generation (RAG) system buil
 - **Local Embedding & Storage**: Uses `SentenceTransformer("BAAI/bge-small-en-v1.5")` on Apple Silicon Metal Performance Shaders (`mps`) and stores embeddings in local on-disk Qdrant collection (`./qdrant_db`).
 - **Two-Stage Retrieval & Re-ranking**: Fast top-15 vector retrieval followed by cross-encoder re-ranking (`cross-encoder/ms-marco-MiniLM-L-6-v2`) on `mps` down to top-5 chunks.
 - **Zero-Extrapolation Generation**: Synthesizes responses strictly using retrieved context with inline page citations `[Source: Page X]` via `gemini-3.1-flash-lite`.
-- **Streamlit Web UI**: Includes live batch ingestion progress, chat interface with expandable context accordions, and memory-safe "New Chat" functionality.
+- **Premium Streamlit Chat UI**: Features a sleek glassmorphism aesthetic, dark mode gradients, custom typography (`Inter`), live streaming batch ingestion progress, expandable context accordions with page citation breakdown, index stats sidebar, and a memory-safe "New Chat" session reset.
 - **Automated 10k-Page Benchmark**: Built-in benchmark engine (`build_and_benchmark.py`) that generates a real 10,000-page dataset from arXiv (`cat:cs.AI`), executes stress testing with `psutil` peak RAM logging, and verifies citation accuracy.
 
 ---
