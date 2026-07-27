@@ -10,7 +10,7 @@ from google import genai
 import config
 
 class RAGQueryEngine:
-    def __init__(self, qdrant_path: str = config.QDRANT_PATH):
+    def __init__(self, qdrant_client: QdrantClient = None, qdrant_path: str = config.QDRANT_PATH):
         self.device = config.DEVICE
         self.qdrant_path = qdrant_path
         
@@ -22,8 +22,11 @@ class RAGQueryEngine:
         print(f"Loading cross-encoder model '{config.CROSS_ENCODER_MODEL_NAME}' on device: {self.device}")
         self.reranker = CrossEncoder(config.CROSS_ENCODER_MODEL_NAME, device=self.device)
         
-        # Connect to Local Qdrant
-        self.qdrant = QdrantClient(path=self.qdrant_path)
+        # Connect to Local Qdrant (reuse existing client if provided)
+        if qdrant_client:
+            self.qdrant = qdrant_client
+        else:
+            self.qdrant = QdrantClient(path=self.qdrant_path)
         
         # Initialize Gemini API Client
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -33,12 +36,17 @@ class RAGQueryEngine:
             self.gemini_client = None
             print("WARNING: GEMINI_API_KEY not set. Gemini zero-extrapolation generation will return a warning.")
 
-    def search_vector_candidates(self, query: str, top_k: int = config.TOP_K_VECTOR) -> List[Dict[str, Any]]:
-        """Encodes query locally with bge-small-en-v1.5 and fetches top_k candidates from Qdrant."""
+    def search_vector_candidates(self, query: str, collection_name: str = config.COLLECTION_NAME, top_k: int = config.TOP_K_VECTOR) -> List[Dict[str, Any]]:
+        """Encodes query locally with bge-small-en-v1.5 and fetches top_k candidates from specified Qdrant collection."""
         query_vector = self.embedder.encode(query, device=self.device).tolist()
         
+        # Verify collection exists before querying
+        collections = [c.name for c in self.qdrant.get_collections().collections]
+        if collection_name not in collections:
+            return []
+
         response = self.qdrant.query_points(
-            collection_name=config.COLLECTION_NAME,
+            collection_name=collection_name,
             query=query_vector,
             limit=top_k
         )
@@ -115,9 +123,9 @@ class RAGQueryEngine:
                 "sources": context_chunks
             }
 
-    def query(self, query: str) -> Dict[str, Any]:
+    def query(self, query: str, collection_name: str = config.COLLECTION_NAME) -> Dict[str, Any]:
         """Full end-to-end RAG pipeline: vector search -> reranking -> LLM synthesis."""
-        vector_candidates = self.search_vector_candidates(query)
+        vector_candidates = self.search_vector_candidates(query, collection_name=collection_name)
         top_reranked = self.rerank_candidates(query, vector_candidates)
         result = self.generate_answer(query, top_reranked)
         return result

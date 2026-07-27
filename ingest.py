@@ -26,8 +26,9 @@ from google.genai import types
 import config
 
 class MultiParserIngestionEngine:
-    def __init__(self, pdf_path: str, qdrant_path: str = config.QDRANT_PATH):
+    def __init__(self, pdf_path: str, collection_name: str = config.COLLECTION_NAME, qdrant_path: str = config.QDRANT_PATH):
         self.pdf_path = pdf_path
+        self.collection_name = collection_name
         self.qdrant_path = qdrant_path
         self.device = config.DEVICE
         
@@ -40,9 +41,9 @@ class MultiParserIngestionEngine:
 
     def _init_qdrant_collection(self):
         collections = [c.name for c in self.qdrant.get_collections().collections]
-        if config.COLLECTION_NAME not in collections:
+        if self.collection_name not in collections:
             self.qdrant.create_collection(
-                collection_name=config.COLLECTION_NAME,
+                collection_name=self.collection_name,
                 vectors_config=VectorParams(size=self.vector_dim, distance=Distance.COSINE)
             )
 
@@ -132,7 +133,7 @@ class MultiParserIngestionEngine:
                 point_id_counter += len(points)
                     
                 self.qdrant.upsert(
-                    collection_name=config.COLLECTION_NAME,
+                    collection_name=self.collection_name,
                     points=points
                 )
                 total_chunks_indexed += len(points)

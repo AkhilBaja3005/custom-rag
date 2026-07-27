@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import streamlit as st
 from qdrant_client import QdrantClient
@@ -107,13 +108,42 @@ code, pre, .source-chip {
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
+# Singleton Resource Caching (Single Qdrant Client & Query Engine)
+# ---------------------------------------------------------
+@st.cache_resource
+def get_qdrant_client():
+    return QdrantClient(path=config.QDRANT_PATH)
+
+@st.cache_resource
+def get_rag_query_engine():
+    qclient = get_qdrant_client()
+    return RAGQueryEngine(qdrant_client=qclient)
+
+qclient = get_qdrant_client()
+query_engine = get_rag_query_engine()
+
+# Helper function to sanitize user collection names
+def sanitize_collection_name(name: str) -> str:
+    clean = re.sub(r'[^a-zA-Z0-9_-]', '_', name.lower())
+    return clean if clean else config.COLLECTION_NAME
+
+# ---------------------------------------------------------
 # Session State Initialization
 # ---------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "query_engine" not in st.session_state:
-    st.session_state.query_engine = RAGQueryEngine()
+# Fetch available collections dynamically from Qdrant
+try:
+    existing_collections = [c.name for c in qclient.get_collections().collections]
+except Exception:
+    existing_collections = []
+
+if not existing_collections:
+    existing_collections = [config.COLLECTION_NAME]
+
+if "selected_collection" not in st.session_state:
+    st.session_state.selected_collection = existing_collections[0]
 
 # ---------------------------------------------------------
 # Sidebar Panel: Document Ingestion & Database Metrics
@@ -130,12 +160,34 @@ with st.sidebar:
     
     st.divider()
     
+    # Target Document / Collection Selector
+    st.subheader("📚 Target Document Collection")
+    selected_col = st.selectbox(
+        "Select Document Context to Query:",
+        options=existing_collections,
+        index=existing_collections.index(st.session_state.selected_collection) if st.session_state.selected_collection in existing_collections else 0,
+        help="Select which indexed PDF document or collection to search against."
+    )
+    if selected_col != st.session_state.selected_collection:
+        st.session_state.selected_collection = selected_col
+        st.session_state.messages = []
+        st.rerun()
+
+    st.divider()
+    
     # PDF Upload Section
-    st.subheader("📄 PDF Ingestion")
+    st.subheader("📄 Upload & Index New PDF")
+    custom_name = st.text_input("Custom Collection Name (Optional)", placeholder="e.g., medical_research_2026")
     uploaded_file = st.file_uploader("Upload PDF Document (up to 10k pages)", type=["pdf"])
     
     if uploaded_file is not None:
-        if st.button("🚀 Start Streaming Ingestion"):
+        if st.button("🚀 Start Streaming Ingestion", use_container_width=True):
+            # Resolve target collection name
+            if custom_name.strip():
+                target_col = sanitize_collection_name(custom_name)
+            else:
+                target_col = sanitize_collection_name(uploaded_file.name.replace(".pdf", ""))
+                
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
                 tmp_path = tmp_file.name
@@ -149,9 +201,12 @@ with st.sidebar:
                 status_text.markdown(f"**Processing Batch:** Pages `{start_page}` to `{end_page}` of `{total_pages}`...")
 
             try:
-                ingest_engine = MultiParserIngestionEngine(tmp_path)
+                ingest_engine = MultiParserIngestionEngine(tmp_path, collection_name=target_col)
                 stats = ingest_engine.process_pdf_streaming(progress_callback=progress_callback)
-                st.success(f"✅ Ingestion Completed!\n\n- **Pages:** {stats['total_pages']:,}\n- **Chunks:** {stats['total_chunks']:,}\n- **Speed:** {stats['speed']:.2f} pages/sec")
+                st.session_state.selected_collection = target_col
+                st.session_state.messages = []
+                st.success(f"✅ Ingested into collection `{target_col}`!\n\n- **Pages:** {stats['total_pages']:,}\n- **Chunks:** {stats['total_chunks']:,}\n- **Speed:** {stats['speed']:.2f} pages/sec")
+                st.rerun()
             except Exception as e:
                 st.error(f"Error during ingestion: {str(e)}")
             finally:
@@ -160,14 +215,14 @@ with st.sidebar:
 
     st.divider()
     
-    # Qdrant DB Stats
-    st.subheader("📊 Vector DB Status")
+    # Active Qdrant DB Collection Stats
+    st.subheader("📊 Active Collection Status")
     try:
-        qclient = QdrantClient(path=config.QDRANT_PATH)
-        info = qclient.get_collection(collection_name=config.COLLECTION_NAME)
-        st.metric("Total Indexed Chunks", f"{info.points_count:,}")
+        info = qclient.get_collection(collection_name=st.session_state.selected_collection)
+        st.metric("Active Collection", st.session_state.selected_collection)
+        st.metric("Indexed Chunks", f"{info.points_count:,}")
     except Exception:
-        st.write("No collection found yet.")
+        st.write("No active collection points.")
         
     st.divider()
     
@@ -179,9 +234,9 @@ with st.sidebar:
 # ---------------------------------------------------------
 # Main Page Header
 # ---------------------------------------------------------
-st.markdown("""
+st.markdown(f"""
 <div class="main-header">
-    <div class="main-title">⚡ Local 10,000-Page PDF RAG Engine</div>
+    <div class="main-title">⚡ Local RAG Studio ({st.session_state.selected_collection})</div>
     <div class="sub-title">PyTorch MPS Acceleration • Cross-Encoder Re-Ranking • Gemini 3.1 Flash-Lite Zero Extrapolation</div>
 </div>
 """, unsafe_allow_html=True)
@@ -203,7 +258,7 @@ for msg in st.session_state.messages:
                     st.text_area(f"Chunk {idx} (Page {src['page']})", src["text"], height=100, key=f"hist_{msg['id']}_{idx}")
 
 # Chat Input
-if prompt := st.chat_input("Ask a question about your indexed PDF document..."):
+if prompt := st.chat_input(f"Ask a question about document '{st.session_state.selected_collection}'..."):
     # Render user prompt
     st.session_state.messages.append({"role": "user", "content": prompt, "id": len(st.session_state.messages)})
     with st.chat_message("user"):
@@ -211,8 +266,8 @@ if prompt := st.chat_input("Ask a question about your indexed PDF document..."):
 
     # Synthesize Assistant Answer
     with st.chat_message("assistant"):
-        with st.spinner("Retrieving candidates & re-ranking with Cross-Encoder..."):
-            res = st.session_state.query_engine.query(prompt)
+        with st.spinner(f"Searching collection '{st.session_state.selected_collection}' & re-ranking..."):
+            res = query_engine.query(prompt, collection_name=st.session_state.selected_collection)
             answer_text = res["answer"]
             sources = res["sources"]
 
