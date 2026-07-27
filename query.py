@@ -175,22 +175,25 @@ class RAGQueryEngine:
             chunk_content = c.get("parent_text", c.get("text", ""))
             context_blocks.append(f"--- CONTEXT BLOCK {idx} {page_info} ---\n{chunk_content}")
 
-        # Integrate Context Compression & Self-RAG Reflection Directives
+        # Integrate LLMLingua-2 Context Compression & Self-RAG Reflection Directives
         try:
-            from prompt_compressor import PromptCompressorSelfRAG
-            compressor = PromptCompressorSelfRAG()
-            formatted_context = compressor.compress_context_blocks(context_blocks)
+            from compressor_self_rag import LLMLingua2SelfRAGCompressor
+            compressor = LLMLingua2SelfRAGCompressor()
+            formatted_context = compressor.compress_context_llmlingua2(context_blocks, compression_rate=0.5)
+            system_prompt = compressor.format_self_rag_system_prompt(
+                "You are a strict, SOTA production-grade Retrieval-Augmented Generation assistant.\n"
+                "Answer ONLY using the provided context blocks. Include inline page citations like [Source: Page X].\n"
+                "If the answer cannot be found in the provided context, state clearly: "
+                "'I cannot answer this question based on the provided document context.'\n"
+                "DO NOT extrapolate, speculate, or draw on external knowledge."
+            )
         except Exception:
             formatted_context = "\n\n".join(context_blocks)
-
-        system_prompt = (
-            "You are a strict, SOTA production-grade Retrieval-Augmented Generation assistant.\n"
-            "Answer ONLY using the provided context blocks. Include inline page citations like [Source: Page X].\n"
-            "If the answer cannot be found in the provided context, state clearly: "
-            "'I cannot answer this question based on the provided document context.'\n"
-            "DO NOT extrapolate, speculate, or draw on external knowledge.\n\n"
-            "SELF-RAG DIRECTIVE: Evaluate your generated claims using reflection markers [Relevant], [Supported], [Utility]."
-        )
+            system_prompt = (
+                "You are a strict, SOTA production-grade Retrieval-Augmented Generation assistant.\n"
+                "Answer ONLY using the provided context blocks. Include inline page citations like [Source: Page X].\n"
+                "DO NOT extrapolate, speculate, or draw on external knowledge."
+            )
 
         user_prompt = f"Context Information:\n{formatted_context}\n\nQuestion: {query}"
 
@@ -269,18 +272,18 @@ class RAGQueryEngine:
             except Exception:
                 pass
 
-        # 5. Hierarchical Community GraphRAG Traversal
+        # 5. Leiden Hierarchical Community GraphRAG Traversal
         if route_info.get("use_graph", False):
             try:
-                from community_graph import HierarchicalCommunityGraphRAG
-                comm_graph = HierarchicalCommunityGraphRAG()
-                comm_graph.build_hierarchical_communities(top_reranked, max_chunks=5)
-                comm_summary = comm_graph.query_community_summaries()
-                if comm_summary:
+                from leiden_graph import LeidenCommunityGraphRAG
+                leiden_graph = LeidenCommunityGraphRAG()
+                leiden_graph.build_leiden_community_tree(top_reranked, max_chunks=5)
+                leiden_summary = leiden_graph.query_leiden_community_summaries(query)
+                if leiden_summary:
                     top_reranked.append({
                         "page": 0,
-                        "text": f"[Hierarchical Community GraphRAG Summary]\n{comm_summary}",
-                        "parent_text": f"[Hierarchical Community GraphRAG Summary]\n{comm_summary}",
+                        "text": f"[Leiden Hierarchical Community GraphRAG Summary]\n{leiden_summary}",
+                        "parent_text": f"[Leiden Hierarchical Community GraphRAG Summary]\n{leiden_summary}",
                         "rerank_score": 9.99
                     })
             except Exception:

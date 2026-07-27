@@ -57,12 +57,17 @@ class MultiParserIngestionEngine:
         """In-memory extraction with Contextual Chunk Prepending."""
         try:
             page = doc[page_num]
-            text = page.get_text("text")
-            if not text or not text.strip():
+            # SOTA Vision-Native ColPali / VLM Page Image Rendering & Parsing
+            try:
+                from vision_parser import VisionNativeColPaliParser
+                vision_parser = VisionNativeColPaliParser()
+                content = vision_parser.parse_page_vision_native(doc, page_num)
+            except Exception:
+                content = page.get_text("text").strip()
+
+            if not content:
                 return []
                 
-            content = text.strip()
-            # Contextual Header Prepending (Doc Name + Page Meta)
             doc_name = os.path.basename(self.pdf_path)
             context_header = f"[Doc: {doc_name} | Page {page_num + 1}]\n"
             
