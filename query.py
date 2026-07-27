@@ -236,7 +236,22 @@ class RAGQueryEngine:
         fused_candidates = self.reciprocal_rank_fusion(vector_candidates, bm25_candidates)
         top_reranked = self.rerank_candidates(query, fused_candidates)
         
-        # 4. Zero-Extrapolation Answer Synthesis
+        # 4. Graph RAG Knowledge Graph Traversal
+        try:
+            from graph_rag import GraphRAGEngine
+            graph_engine = GraphRAGEngine()
+            graph_engine.build_graph_from_chunks(top_reranked, max_chunks=5)
+            graph_context = graph_engine.query_graph_context(query)
+            if graph_context:
+                top_reranked.append({
+                    "page": 0,
+                    "text": f"[Knowledge Graph Relationship Traversal]\n{graph_context}",
+                    "rerank_score": 9.99
+                })
+        except Exception:
+            pass
+
+        # 5. Zero-Extrapolation Answer Synthesis
         result = self.generate_answer(query, top_reranked)
         result["is_cache_hit"] = False
         
