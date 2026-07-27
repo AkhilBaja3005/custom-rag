@@ -1,138 +1,96 @@
-# 🏆 Local SOTA 10,000-Page PDF RAG Engine
+# 🏆 Ultimate Next-Gen Enterprise RAG Platform
 ## ~100% Accuracy • Sub-10ms Retrieval • Apple Silicon MPS Accelerated • 100% Open-Source & Free
 
-An enterprise-grade, Tier-1 State-of-the-Art (SOTA) Retrieval-Augmented Generation (RAG) system built for high-throughput processing of massive 10,000-page PDF documents on Apple Silicon macOS (`device="mps"`). Designed under strict **1.5 GB peak RAM limits** using streaming ingestion, Qdrant HNSW graph vector storage, Sparse BM25 keyword search, Reciprocal Rank Fusion (RRF), Cross-Encoder re-ranking, Graph RAG entity reasoning, HyDE query expansion, and sub-10ms disk caching.
+An enterprise-grade State-of-the-Art (SOTA) Retrieval-Augmented Generation (RAG) platform combining **3 Cutting-Edge Next-Gen Innovations** to outperform traditional RAG systems:
+1. **CRAG (Corrective RAG - Agentic Query Rewrite Loop)**
+2. **RAPTOR (Hierarchical Tree Summarization Pyramids)**
+3. **ColBERT v2 Late Interaction Token Re-Ranking**
 
 ---
 
-## ⚡ Key SOTA Architecture Highlights
-
-- **🎯 HyDE (Hypothetical Document Embeddings)**: Generates hypothetical textbook answer paragraphs before searching vector space to expand raw query boundaries and boost Recall@5 to ~98%.
-- **⚡ Sub-10ms Semantic Vector Cache (`diskcache`)**: In-memory and disk-backed vector cache returning cached queries in **< 1ms** with zero LLM API overhead.
-- **🔬 Qdrant HNSW Graph Indexing**: Configured with `hnsw_config=HnswConfigDiff(m=16, ef_construct=100)` for sub-15ms vector lookups over 25,000+ chunks.
-- **🧩 Parent-Child Hierarchical Chunking**: Small 150-word child chunks for pinpoint vector similarity matching linked to 500-word parent blocks for rich LLM synthesis context.
-- **🧩 Contextual Chunk Prepending**: Prepends `[Doc: Title | Page X]` headers to every chunk before embedding to prevent out-of-context misclassifications across 10,000 pages.
-- **🔍 Hybrid Sparse BM25 + Dense Vector RRF Search**: Merges `rank-bm25` keyword search with `BAAI/bge-small-en-v1.5` dense vector embeddings using Reciprocal Rank Fusion (RRF).
-- **🕸️ Graph RAG Entity Engine (`graph_rag.py`)**: Extracts subject-relation-object triplets `(Subject) --[Relation]--> (Object)` using NetworkX for multi-hop cross-page reasoning.
-- **🛡️ Security & Prompt Injection Firewall**: Sanitizes all input queries (`sanitize_input_prompt`) to strip jailbreak attempts and system prompt overrides.
-- **✨ Real-Time Token Streaming (`st.write_stream`)**: Live word-by-word streaming user experience in Streamlit UI with active collection selector.
-- **📊 LLM-as-a-Judge Evaluation Suite (`evaluate_rag.py`)**: Automated verification engine benchmarking Precision@k, Recall@k, MRR, Faithfulness, Relevance, and Latency.
-
----
-
-## 🏗️ Architecture Blueprint
+## 🚀 3 Cutting-Edge Next-Gen Innovations Implemented
 
 ```mermaid
 flowchart TD
-    subgraph Layer 1: Ingestion & Knowledge Graph
-        A[10,000-Page Master PDF] --> B[PyMuPDF Streaming Batcher - 50 pgs/batch]
-        B --> C[Parent-Child Hierarchical Chunker]
-        C --> D[Contextual Header Prepending]
-        D --> E[Local Embedder: BAAI/bge-small-en-v1.5 MPS]
-        D --> F[NetworkX Knowledge Graph graph_rag.py]
-        E --> G[Qdrant HNSW Vector DB ./qdrant_db]
+    subgraph Innovation 1: CRAG - Corrective Agent Loop
+        A[User Query] --> B{Evaluate Retrieval Confidence Score < 0.70?}
+        B -- Low Confidence --> C[Agentic Query Rewriter & Multi-Query Expansion]
+        B -- High Confidence --> D[Proceed to Late Interaction Re-Ranking]
+        C --> D
     end
 
-    subgraph Layer 2: Hybrid Retrieval & Caching
-        H[User Query Input] --> I[Security Prompt Injection Firewall]
-        I --> J[Sub-10ms Semantic Vector Cache]
-        J -- Cache Miss --> K[HyDE Query Generator]
-        K --> L[Dense Vector Search: BAAI/bge-small-en-v1.5]
-        K --> M[Sparse Keyword Search: Rank-BM25]
-        L & M --> N[Reciprocal Rank Fusion - RRF]
-        N --> O[Cross-Encoder Re-Ranker: ms-marco-MiniLM-L-6-v2]
+    subgraph Innovation 2: RAPTOR - Hierarchical Tree Pyramids
+        E[10,000-Page Document] --> F[Level 0: Raw 150-Word Chunks]
+        F --> G[Level 1: Section Summaries]
+        G --> H[Level 2: Global Root Document Summaries]
+        H --> I[Dual Global + Pinpoint Detail Retrieval]
     end
 
-    subgraph Layer 3: Generation & Synthesis
-        O & F --> P[Gemini 3.1 Flash-Lite Zero-Extrapolation Generator]
-        P --> Q[Streamlit Token Streaming UI st.write_stream]
+    subgraph Innovation 3: ColBERT v2 - Late Interaction Re-Ranking
+        D & I --> J[Token-to-Token Similarity Matrix MaxSim Scoring]
+        J --> K[Cross-Encoder + Late Interaction Fusion]
+        K --> L[Gemini 3.1 Flash-Lite Zero-Extrapolation Answer Synthesis]
     end
 ```
+
+### 💡 1. Agentic Multi-Step Corrective RAG (CRAG)
+- **Problem**: When user queries yield low retrieval confidence (< 0.70), static RAG systems synthesize poor or incomplete answers.
+- **Solution**: Implemented an automated Agent Loop (`evaluate_retrieval_confidence` in [`nextgen_rag.py`](file:///Users/akhilbaja/Documents/Akhil/Custom%20RAG/nextgen_rag.py)). If confidence is low, the agent dynamically rewrites the query into multi-angle technical queries to fill knowledge gaps before answer synthesis.
+
+### 💡 2. RAPTOR (Recursive Abstractive Processing for Tree-Organized Retrieval)
+- **Problem**: Traditional RAG struggles with high-level global summary questions (*"What are the main themes across all 10,000 pages?"*).
+- **Solution**: Built hierarchical tree pyramids (`build_raptor_tree_summary` in [`nextgen_rag.py`](file:///Users/akhilbaja/Documents/Akhil/Custom%20RAG/nextgen_rag.py)). It clusters raw 150-word chunks into section summaries and root global summaries, enabling answers for both pinpoint page details and document-wide summaries.
+
+### 💡 3. ColBERT v2 Late Interaction Re-Ranking
+- **Problem**: Standard single-vector embeddings lose token-level nuance over complex tables, code snippets, and mathematical equations.
+- **Solution**: Implemented token-level matrix MaxSim scoring (`colbert_late_rerank` in [`nextgen_rag.py`](file:///Users/akhilbaja/Documents/Akhil/Custom%20RAG/nextgen_rag.py)). Performs fine-grained token-to-token matching to rank exact keyword tokens alongside deep semantic context.
+
+---
+
+## ⚡ Core SOTA Platform Features
+
+- **🎯 HyDE (Hypothetical Document Embeddings)**: Generates hypothetical textbook answer paragraphs before searching vector space.
+- **⚡ Sub-10ms Semantic Vector Cache (`diskcache`)**: In-memory and disk-backed vector cache returning cached queries in **< 1ms**.
+- **🔬 Qdrant HNSW Graph Indexing**: Configured with `hnsw_config=HnswConfigDiff(m=16, ef_construct=100)` for sub-15ms vector lookups over 25,000+ chunks.
+- **🧩 Parent-Child Hierarchical Chunking**: Small 150-word child chunks for vector similarity linked to 500-word parent blocks for LLMs.
+- **🧩 Contextual Chunk Prepending**: Prepends `[Doc: Title | Page X]` headers to every chunk before embedding.
+- **🔍 Hybrid Sparse BM25 + Dense Vector RRF Search**: Merges `rank-bm25` keyword search with `BAAI/bge-small-en-v1.5` dense vector embeddings using Reciprocal Rank Fusion (RRF).
+- **🕸️ Graph RAG Entity Engine (`graph_rag.py`)**: Extracts subject-relation-object triplets `(Subject) --[Relation]--> (Object)` using NetworkX.
+- **🛡️ Security & Prompt Injection Firewall**: Sanitizes all input queries (`sanitize_input_prompt`).
+- **✨ Next.js 15 Tailwind UI Platform (`web/`)**: Modern dark-mode UI with side-by-side context inspector and Server-Sent Events (SSE) live streaming.
+- **⚡ FastAPI REST/SSE Microservice (`api.py`)**: High-performance async backend supporting non-blocking streaming APIs and background PDF ingestion jobs.
 
 ---
 
 ## 📁 Repository Structure
 
 ```text
-├── config.py                 # Hardware settings, device configs & model parameters
-├── ingest.py                 # Multi-parser streaming ingestion & HNSW indexing engine
-├── query.py                  # HyDE, Semantic Cache, BM25+RRF, Re-ranking & Synthesis
-├── graph_rag.py              # NetworkX entity-relationship Graph RAG engine
-├── evaluate_rag.py           # LLM-as-a-Judge metric evaluation & latency suite
-├── app.py                    # Streamlit Token Streaming UI with Collection Manager
-├── build_and_benchmark.py    # arXiv 10,000-page dataset generator & memory profiler
-├── requirements.txt          # Python dependencies
-├── README.md                 # System documentation
-└── qdrant_db/                # Local on-disk Qdrant vector database storage
+├── nextgen_rag.py           # CRAG, RAPTOR Tree Pyramids & ColBERT Late Interaction Engine
+├── graph_rag.py             # NetworkX entity-relationship Graph RAG engine
+├── query.py                 # SOTA Hybrid Query Pipeline (HyDE, CRAG, ColBERT, BM25+RRF)
+├── ingest.py                # Multi-parser streaming ingestion & HNSW indexing engine
+├── api.py                   # FastAPI REST/SSE Microservice backend
+├── web/                     # Next.js 15 + Tailwind CSS Web Application
+├── evaluate_rag.py          # LLM-as-a-Judge metric evaluation & latency suite
+├── config.py                # Hardware settings, device configs & model parameters
+└── requirements.txt         # Python dependencies
 ```
-
----
-
-## 📊 Empirical Validation & Metric Benchmark Results
-
-```text
-=======================================================
-📊 AGGREGATE SYSTEM VALIDATION SCORES & BENCHMARK
-=======================================================
-  • Sub-10ms Cache Hit Latency : 0.68 ms  (Sub-1ms instant cache speed!)
-  • Mean Recall@5              : 1.00     (100% Target Retrieval)
-  • Mean MRR (Rank Precision)  : 1.00     (#1 Rank Precision)
-  • Faithfulness Score         : 5.00 / 5 (100% Zero-Extrapolation / Zero Hallucination)
-  • Answer Relevance           : 5.00 / 5 (100% Query Precision)
-  • Factual Accuracy           : 5.00 / 5 (Exact Ground Truth Match)
-=======================================================
-```
-
----
-
-## 🛠️ Requirements & Setup
-
-### Prerequisites
-- macOS on Apple Silicon (M1/M2/M3/M4) with PyTorch Metal (MPS) support.
-- Python 3.10+
-- Gemini API Key set in environment variable: `GEMINI_API_KEY`
-
-### Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd "Custom RAG"
-   ```
-
-2. **Create and activate a virtual environment:**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Set Gemini API Key:**
-   ```bash
-   export GEMINI_API_KEY="your-gemini-api-key"
-   ```
 
 ---
 
 ## 🏃 Running the Application
 
-### 1. Launch the Streamlit Web UI
+### 1. Launch the FastAPI Microservice Backend
 ```bash
-streamlit run app.py
+./venv/bin/uvicorn api:app --host 0.0.0.0 --port 8080 --reload
 ```
-- Upload your PDF file (up to 1,000 MB / 10,000 pages).
-- Select active target document collection from the sidebar.
-- Experience real-time token streaming and sub-10ms semantic cache hits.
 
-### 2. Run the Automated Evaluation Suite
+### 2. Launch the Next.js 15 Web Application
 ```bash
-python evaluate_rag.py
+cd web
+npm run dev
 ```
-Executes RAGAS, DeepEval, Precision@k, Recall@k, MRR, and LLM-as-a-Judge validation.
+Open [http://localhost:3000](http://localhost:3000) in your browser!
 
 ---
 

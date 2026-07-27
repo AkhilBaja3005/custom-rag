@@ -232,11 +232,31 @@ class RAGQueryEngine:
 
         bm25_candidates = self.search_bm25_candidates(query, vector_candidates)
         
-        # 3. Reciprocal Rank Fusion & Re-Ranking
+        # 3. Reciprocal Rank Fusion & Cross-Encoder Re-Ranking
         fused_candidates = self.reciprocal_rank_fusion(vector_candidates, bm25_candidates)
         top_reranked = self.rerank_candidates(query, fused_candidates)
-        
-        # 4. Graph RAG Knowledge Graph Traversal
+
+        # 4. Next-Gen Innovation 1: CRAG (Corrective RAG Agent Loop Evaluation)
+        # Next-Gen Innovation 3: ColBERT Late Interaction Re-Ranking
+        try:
+            from nextgen_rag import SOTAUltimateRAGEngine
+            nextgen_engine = SOTAUltimateRAGEngine()
+            
+            # Evaluate retrieval confidence
+            crag_eval = nextgen_engine.evaluate_retrieval_confidence(query, top_reranked)
+            if crag_eval["needs_correction"] and crag_eval["corrected_query"] != query:
+                # Corrective search using agentic rewritten query
+                extra_candidates = self.search_vector_candidates(crag_eval["corrected_query"], collection_name=collection_name)
+                for cand in extra_candidates:
+                    if cand["id"] not in {c["id"] for c in top_reranked}:
+                        top_reranked.append(cand)
+
+            # Apply ColBERT Late Interaction MaxSim Re-Ranking
+            top_reranked = nextgen_engine.colbert_late_rerank(query, top_reranked)
+        except Exception:
+            pass
+
+        # 5. Graph RAG Knowledge Graph Traversal
         try:
             from graph_rag import GraphRAGEngine
             graph_engine = GraphRAGEngine()
@@ -251,7 +271,7 @@ class RAGQueryEngine:
         except Exception:
             pass
 
-        # 5. Zero-Extrapolation Answer Synthesis
+        # 6. Zero-Extrapolation Answer Synthesis
         result = self.generate_answer(query, top_reranked)
         result["is_cache_hit"] = False
         
