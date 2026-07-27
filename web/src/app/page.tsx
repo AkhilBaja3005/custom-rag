@@ -38,7 +38,7 @@ interface Message {
 }
 
 export default function Home() {
-  const API_BASE = "http://localhost:8000";
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
   // State
   const [collections, setCollections] = useState<Collection[]>([]);
