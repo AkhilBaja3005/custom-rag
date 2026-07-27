@@ -43,6 +43,14 @@ class MultiParserIngestionEngine:
             
         self._init_qdrant_collection()
 
+        # Create ONE shared VLM parser instance to avoid re-instantiating it per page
+        # (which caused 10,000 serial Gemini API calls on a 10k-page PDF)
+        try:
+            from vision_parser import VisionNativeColPaliParser
+            self._vision_parser = VisionNativeColPaliParser()
+        except Exception:
+            self._vision_parser = None
+
     def _init_qdrant_collection(self):
         collections = [c.name for c in self.qdrant.get_collections().collections]
         if self.collection_name not in collections:
@@ -53,17 +61,36 @@ class MultiParserIngestionEngine:
                 hnsw_config=HnswConfigDiff(m=16, ef_construct=100)  # SOTA HNSW Graph Indexing
             )
 
+    def _is_image_heavy_page(self, page: fitz.Page, text: str, min_text_chars: int = 80) -> bool:
+        """Returns True if a page is image-heavy or scanned (needs VLM), False if text-rich (fast path)."""
+        # If page has enough extractable text, skip VLM entirely
+        if len(text.strip()) >= min_text_chars:
+            return False
+        # Check if page contains embedded images
+        try:
+            return len(page.get_images(full=False)) > 0
+        except Exception:
+            return False
+
     def _extract_and_chunk_page(self, doc: fitz.Document, page_num: int):
-        """In-memory extraction with Contextual Chunk Prepending."""
+        """In-memory extraction with Contextual Chunk Prepending.
+        
+        Smart dual-path strategy:
+        - Text-rich pages  → fast fitz.get_text() (no API call, sub-millisecond)
+        - Image/scanned pages → Gemini VLM (only when necessary)
+        """
         try:
             page = doc[page_num]
-            # SOTA Vision-Native ColPali / VLM Page Image Rendering & Parsing
-            try:
-                from vision_parser import VisionNativeColPaliParser
-                vision_parser = VisionNativeColPaliParser()
-                content = vision_parser.parse_page_vision_native(doc, page_num)
-            except Exception:
-                content = page.get_text("text").strip()
+            raw_text = page.get_text("text").strip()
+
+            # Only call VLM if page is image-heavy or scanned (low text density)
+            if self._vision_parser and self._is_image_heavy_page(page, raw_text):
+                try:
+                    content = self._vision_parser.parse_page_vision_native(doc, page_num)
+                except Exception:
+                    content = raw_text
+            else:
+                content = raw_text
 
             if not content:
                 return []
@@ -148,7 +175,7 @@ class MultiParserIngestionEngine:
         total_pages = len(doc)
         
         print(f"🚀 Starting SAFE HIGH-SPEED ingestion for '{self.pdf_path}' ({total_pages} pages)...")
-        batch_size = 50  # Safe streaming batch size (50 pages) to strictly prevent Unified RAM spikes
+        batch_size = 100  # Increased batch size: text-only fast path is cheap; VLM is per-page only when needed
         point_id_counter = int(time.time() * 1000)
         
         total_chunks_indexed = 0
