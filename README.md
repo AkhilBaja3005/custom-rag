@@ -23,33 +23,35 @@ The system is decoupled into an async **FastAPI REST/SSE Microservice Backend** 
 
 ```mermaid
 flowchart TD
-    subgraph Layer 1: Vision-Native VLM Ingestion & Leiden Clustering
-        A[PDF Documents - up to 100k+ Pages] --> B[PyMuPDF fitz High-Res Page Image Renderer - 150 DPI]
-        B --> C[VisionNativeColPaliParser Gemini VLM Page Patch Parsing vision_parser.py]
-        C --> D[Semantic Sentence Boundary Chunker]
-        D --> E[Local Dense Embedder: BAAI/bge-small-en-v1.5]
-        D --> F[LeidenCommunityGraphRAG leiden_graph.py]
-        E --> G[Qdrant HNSW Vector DB ./qdrant_db]
+    subgraph Layer1["Layer 1: Vision-Native VLM Ingestion and Leiden Clustering"]
+        A["PDF Documents - up to 100k+ Pages"] --> B["PyMuPDF fitz High-Res Page Image Renderer - 150 DPI"]
+        B --> C["VisionNativeColPaliParser Gemini VLM Page Patch Parsing vision_parser.py"]
+        C --> D["Semantic Sentence Boundary Chunker"]
+        D --> E["Local Dense Embedder: BAAI/bge-small-en-v1.5"]
+        D --> F["LeidenCommunityGraphRAG leiden_graph.py"]
+        E --> G["Qdrant HNSW Vector DB ./qdrant_db"]
     end
 
-    subgraph Layer 2: Adaptive Next-Gen Retrieval & Caching
-        H[User Query Input] --> I[Security Prompt Injection Firewall]
-        I --> J[Sub-1ms Semantic Vector Cache diskcache]
-        J -- Cache Miss --> K[Adaptive Intent Query Router nextgen_rag.py]
-        K --> L[HyDE Query Generator]
-        K --> M[Dense Vector Search: BAAI/bge-small-en-v1.5]
-        K --> N[Sparse Keyword Search: Rank-BM25]
-        M & N --> O[Reciprocal Rank Fusion - RRF]
-        O --> P[Cross-Encoder Re-Ranker: ms-marco-MiniLM-L-6-v2]
-        P --> Q[CRAG Fast-Path Agent Loop Evaluation]
-        Q --> R[ColBERT v2 Late Interaction MaxSim Re-Ranking]
+    subgraph Layer2["Layer 2: Adaptive Next-Gen Retrieval and Caching"]
+        H["User Query Input"] --> I["Security Prompt Injection Firewall"]
+        I --> J["Sub-1ms Semantic Vector Cache diskcache"]
+        J -- Cache Miss --> K["Adaptive Intent Query Router nextgen_rag.py"]
+        K --> L["HyDE Query Generator"]
+        K --> M["Dense Vector Search: BAAI/bge-small-en-v1.5"]
+        K --> N["Sparse Keyword Search: Rank-BM25"]
+        M --> O["Reciprocal Rank Fusion - RRF"]
+        N --> O
+        O --> P["Cross-Encoder Re-Ranker: ms-marco-MiniLM-L-6-v2"]
+        P --> Q["CRAG Fast-Path Agent Loop Evaluation"]
+        Q --> R["ColBERT v2 Late Interaction MaxSim Re-Ranking"]
     end
 
-    subgraph Layer 3: Context Compression, Self-RAG & Streaming UI
-        R & F --> S[LLMLingua2SelfRAGCompressor Token Compression compressor_self_rag.py]
-        S --> T[Self-RAG Reflection Token Directives: Relevant, Supported, Utility]
-        T --> U[Gemini 3.1 Flash-Lite Zero-Extrapolation Answer Generator]
-        U --> V[Next.js 15 Web App - SSE Token Streaming]
+    subgraph Layer3["Layer 3: Context Compression Self-RAG and Streaming UI"]
+        R --> S["LLMLingua2SelfRAGCompressor Token Compression compressor_self_rag.py"]
+        F --> S
+        S --> T["Self-RAG Reflection Token Directives: Relevant, Supported, Utility"]
+        T --> U["Gemini 3.1 Flash-Lite Zero-Extrapolation Answer Generator"]
+        U --> V["Next.js 15 Web App - SSE Token Streaming"]
     end
 ```
 
