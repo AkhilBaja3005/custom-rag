@@ -119,11 +119,16 @@ OUTPUT FORMAT: Return ONLY valid JSON in this structure:
         avg_correctness = 0.0
         total_latency_ms = 0.0
         
+        # Detect available collections
+        cols = [c.name for c in self.query_engine.qdrant.get_collections().collections]
+        default_col = cols[0] if cols else config.COLLECTION_NAME
+
         for idx, item in enumerate(GOLDEN_EVAL_DATASET, 1):
             query = item["query"]
             ground_truth = item["ground_truth"]
             expected_page = item["expected_page"]
-            collection = item.get("collection", config.COLLECTION_NAME)
+            target_col = item.get("collection", config.COLLECTION_NAME)
+            collection = target_col if target_col in cols else default_col
             
             print(f"\n[Test Case {idx}/{len(GOLDEN_EVAL_DATASET)}]: '{query}' (Collection: {collection})")
             

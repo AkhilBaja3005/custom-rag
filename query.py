@@ -215,15 +215,23 @@ class RAGQueryEngine:
             cached_res["is_cache_hit"] = True
             return cached_res
 
-        # 1. HyDE Query Expansion (fallback to raw query if API call fails or times out)
-        search_prompt = self.generate_hyde_query(query) if use_hyde else query
+        # 0. Adaptive Query Intent Routing
+        route_info = {"use_hyde": use_hyde, "use_graph": True}
+        try:
+            from nextgen_rag import SOTAUltimateRAGEngine
+            nextgen_engine = SOTAUltimateRAGEngine()
+            route_info = nextgen_engine.route_query_intent(query)
+        except Exception:
+            nextgen_engine = None
+
+        # 1. HyDE Query Expansion (routed adaptively)
+        should_hyde = use_hyde and route_info.get("use_hyde", True)
+        search_prompt = self.generate_hyde_query(query) if should_hyde else query
         
         # 2. Hybrid Dense Vector Search & BM25 Sparse Search
         vector_candidates = self.search_vector_candidates(search_prompt, collection_name=collection_name)
-        # Ensure BM25 also receives direct query candidates if HyDE shifted query terms
         if search_prompt != query:
             raw_vector_candidates = self.search_vector_candidates(query, collection_name=collection_name)
-            # Merge candidate pools deduplicated by point ID
             seen_ids = {c["id"] for c in vector_candidates}
             for candidate in raw_vector_candidates:
                 if candidate["id"] not in seen_ids:
@@ -236,40 +244,35 @@ class RAGQueryEngine:
         fused_candidates = self.reciprocal_rank_fusion(vector_candidates, bm25_candidates)
         top_reranked = self.rerank_candidates(query, fused_candidates)
 
-        # 4. Next-Gen Innovation 1: CRAG (Corrective RAG Agent Loop Evaluation)
-        # Next-Gen Innovation 3: ColBERT Late Interaction Re-Ranking
-        try:
-            from nextgen_rag import SOTAUltimateRAGEngine
-            nextgen_engine = SOTAUltimateRAGEngine()
-            
-            # Evaluate retrieval confidence
-            crag_eval = nextgen_engine.evaluate_retrieval_confidence(query, top_reranked)
-            if crag_eval["needs_correction"] and crag_eval["corrected_query"] != query:
-                # Corrective search using agentic rewritten query
-                extra_candidates = self.search_vector_candidates(crag_eval["corrected_query"], collection_name=collection_name)
-                for cand in extra_candidates:
-                    if cand["id"] not in {c["id"] for c in top_reranked}:
-                        top_reranked.append(cand)
+        # 4. Next-Gen CRAG Evaluation + ColBERT Late Interaction Re-Ranking
+        if nextgen_engine:
+            try:
+                crag_eval = nextgen_engine.evaluate_retrieval_confidence(query, top_reranked)
+                if crag_eval["needs_correction"] and crag_eval["corrected_query"] != query:
+                    extra_candidates = self.search_vector_candidates(crag_eval["corrected_query"], collection_name=collection_name)
+                    for cand in extra_candidates:
+                        if cand["id"] not in {c["id"] for c in top_reranked}:
+                            top_reranked.append(cand)
 
-            # Apply ColBERT Late Interaction MaxSim Re-Ranking
-            top_reranked = nextgen_engine.colbert_late_rerank(query, top_reranked)
-        except Exception:
-            pass
+                top_reranked = nextgen_engine.colbert_late_rerank(query, top_reranked)
+            except Exception:
+                pass
 
-        # 5. Graph RAG Knowledge Graph Traversal
-        try:
-            from graph_rag import GraphRAGEngine
-            graph_engine = GraphRAGEngine()
-            graph_engine.build_graph_from_chunks(top_reranked, max_chunks=5)
-            graph_context = graph_engine.query_graph_context(query)
-            if graph_context:
-                top_reranked.append({
-                    "page": 0,
-                    "text": f"[Knowledge Graph Relationship Traversal]\n{graph_context}",
-                    "rerank_score": 9.99
-                })
-        except Exception:
-            pass
+        # 5. Non-Blocking Graph RAG Traversal
+        if route_info.get("use_graph", False):
+            try:
+                from graph_rag import GraphRAGEngine
+                graph_engine = GraphRAGEngine()
+                # Fast graph query without heavy API extraction on live path
+                graph_context = graph_engine.query_graph_context(query)
+                if graph_context:
+                    top_reranked.append({
+                        "page": 0,
+                        "text": f"[Knowledge Graph Relationship Traversal]\n{graph_context}",
+                        "rerank_score": 9.99
+                    })
+            except Exception:
+                pass
 
         # 6. Zero-Extrapolation Answer Synthesis
         result = self.generate_answer(query, top_reranked)
