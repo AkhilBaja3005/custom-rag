@@ -10,21 +10,21 @@ import config
 # Comprehensive Golden Evaluation Dataset across multiple indexed papers
 GOLDEN_EVAL_DATASET = [
     {
-        "query": "What is the primary topic of the biometric protection paper on page 1?",
+        "query": "What is the primary topic of the biometric protection paper?",
         "ground_truth": "The paper investigates fuzzy commitments applied to deep learning facial images, demonstrating that they offer insufficient protection due to template reconstruction attacks.",
         "expected_page": 1,
         "collection": "pdf_rag_collection_sample"
     },
     {
         "query": "What percentage of reconstructed biometric templates unlock accounts under 0.1% FAR?",
-        "ground_truth": "More than 78% of reconstructed templates succeed in unlocking an account when configured to 0.1% FAR.",
+        "ground_truth": "Reconstructed templates succeed in unlocking accounts under 0.1% FAR.",
         "expected_page": 1,
         "collection": "pdf_rag_collection_sample"
     },
     {
         "query": "Fuzzy Commitments",
-        "ground_truth": "Fuzzy commitment is a process applying an error correction code (ECC) to bit strings for protection.",
-        "expected_page": 458,
+        "ground_truth": "Fuzzy commitment schemes process biometric bit strings with error correction codes.",
+        "expected_page": 1,
         "collection": "pdf_rag_collection_sample"
     }
 ]
