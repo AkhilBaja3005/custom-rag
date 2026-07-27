@@ -119,6 +119,10 @@ def get_rag_query_engine():
     qclient = get_qdrant_client()
     return RAGQueryEngine(qdrant_client=qclient)
 
+# Detect if qdrant_db was deleted externally and bust the cached client
+if not os.path.exists(config.QDRANT_PATH):
+    st.cache_resource.clear()
+
 qclient = get_qdrant_client()
 query_engine = get_rag_query_engine()
 
@@ -133,17 +137,24 @@ def sanitize_collection_name(name: str) -> str:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Fetch available collections dynamically from Qdrant
+# Fetch LIVE collections from Qdrant on every render (no caching here)
 try:
     existing_collections = [c.name for c in qclient.get_collections().collections]
 except Exception:
     existing_collections = []
 
+# If db was wiped, clear session state so phantom collections don't persist
 if not existing_collections:
-    existing_collections = [config.COLLECTION_NAME]
+    st.session_state.pop("selected_collection", None)
+    st.session_state.messages = []
 
-if "selected_collection" not in st.session_state:
-    st.session_state.selected_collection = existing_collections[0]
+# Ensure selected_collection is still valid; reset if the collection was deleted
+if "selected_collection" not in st.session_state or \
+   st.session_state.selected_collection not in existing_collections:
+    if existing_collections:
+        st.session_state.selected_collection = existing_collections[0]
+    else:
+        st.session_state.selected_collection = None
 
 # ---------------------------------------------------------
 # Sidebar Panel: Document Ingestion & Database Metrics
@@ -162,16 +173,20 @@ with st.sidebar:
     
     # Target Document / Collection Selector
     st.subheader("📚 Target Document Collection")
-    selected_col = st.selectbox(
-        "Select Document Context to Query:",
-        options=existing_collections,
-        index=existing_collections.index(st.session_state.selected_collection) if st.session_state.selected_collection in existing_collections else 0,
-        help="Select which indexed PDF document or collection to search against."
-    )
-    if selected_col != st.session_state.selected_collection:
-        st.session_state.selected_collection = selected_col
-        st.session_state.messages = []
-        st.rerun()
+    if not existing_collections:
+        st.warning("⚠️ No indexed documents found. Upload a PDF to get started.")
+    else:
+        selected_col = st.selectbox(
+            "Select Document Context to Query:",
+            options=existing_collections,
+            index=existing_collections.index(st.session_state.selected_collection)
+                  if st.session_state.selected_collection in existing_collections else 0,
+            help="Select which indexed PDF document or collection to search against."
+        )
+        if selected_col != st.session_state.selected_collection:
+            st.session_state.selected_collection = selected_col
+            st.session_state.messages = []
+            st.rerun()
 
     st.divider()
     
@@ -257,8 +272,10 @@ for msg in st.session_state.messages:
                     )
                     st.text_area(f"Chunk {idx} (Page {src['page']})", src["text"], height=100, key=f"hist_{msg['id']}_{idx}")
 
-# Chat Input
-if prompt := st.chat_input(f"Ask a question about document '{st.session_state.selected_collection}'..."):
+# Chat Input — disabled when no collections exist
+if not existing_collections or not st.session_state.selected_collection:
+    st.info("📂 No indexed documents found. Upload a PDF in the sidebar to start chatting.")
+elif prompt := st.chat_input(f"Ask a question about '{st.session_state.selected_collection}'..."):
     # Render user prompt
     st.session_state.messages.append({"role": "user", "content": prompt, "id": len(st.session_state.messages)})
     with st.chat_message("user"):
