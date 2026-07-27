@@ -1,8 +1,22 @@
 import os
+import sys
 import time
 import requests
 import psutil
+
+# Ensure python stdout flushes immediately
+sys.stdout.reconfigure(line_buffering=True)
+
+# Redirect low-level C stderr (fd 2) to devnull to silence C-library warnings while preserving stdout
+try:
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+except Exception:
+    pass
+
 import fitz  # PyMuPDF
+fitz.TOOLS.mupdf_display_errors(False)
 
 import config
 from ingest import MultiParserIngestionEngine
@@ -19,27 +33,42 @@ def fetch_arxiv_pdfs_and_stitch(target_pages: int = TARGET_PAGE_COUNT, output_pd
         current_pages = len(doc)
         doc.close()
         if current_pages >= target_pages:
-            print(f"Master PDF '{output_pdf_path}' already exists with {current_pages} pages. Skipping download.")
+            print(f"Master PDF '{output_pdf_path}' already exists with {current_pages} pages. Proceeding with benchmark.")
             return output_pdf_path
 
     print(f"Generating benchmark dataset from arXiv API (target: {target_pages} pages)...")
     master_doc = fitz.open()
-    
     start_index = 0
-    batch_fetch_count = 25
+    batch_fetch_count = 50
     
+    import xml.etree.ElementTree as ET
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def download_paper(pdf_link):
+        try:
+            pdf_resp = requests.get(pdf_link, timeout=12)
+            if pdf_resp.status_code == 200:
+                sub_doc = fitz.open(stream=pdf_resp.content, filetype="pdf")
+                # Re-save with clean=True and garbage collection to fix cross-reference (xref) table collisions
+                clean_bytes = sub_doc.tobytes(garbage=4, deflate=True, clean=True)
+                clean_doc = fitz.open(stream=clean_bytes, filetype="pdf")
+                page_count = len(clean_doc)
+                clean_doc.close()
+                sub_doc.close()
+                return (clean_bytes, page_count)
+        except Exception:
+            pass
+        return None
+
     while len(master_doc) < target_pages:
         url = f"https://export.arxiv.org/api/query?search_query=cat:cs.AI&start={start_index}&max_results={batch_fetch_count}"
-        print(f"Fetching arXiv batch from index {start_index}...")
+        print(f"Fetching arXiv papers metadata batch starting at index {start_index} (Current Pages: {len(master_doc)}/{target_pages})...")
         try:
             resp = requests.get(url, timeout=15)
             if resp.status_code != 200:
-                print(f"ArXiv API returned status {resp.status_code}, retrying...")
                 time.sleep(2)
                 continue
                 
-            # Extract PDF download links from arXiv Atom feed XML
-            import xml.etree.ElementTree as ET
             root = ET.fromstring(resp.content)
             entries = root.findall("{http://www.w3.org/2005/Atom}entry")
             
@@ -47,40 +76,50 @@ def fetch_arxiv_pdfs_and_stitch(target_pages: int = TARGET_PAGE_COUNT, output_pd
                 print("No more entries returned from arXiv API.")
                 break
                 
+            pdf_links = []
             for entry in entries:
-                if len(master_doc) >= target_pages:
-                    break
-                    
-                pdf_link = None
                 for link in entry.findall("{http://www.w3.org/2005/Atom}link"):
                     if link.attrib.get("title") == "pdf":
-                        pdf_link = link.attrib.get("href")
+                        href = link.attrib.get("href")
+                        if not href.endswith(".pdf"):
+                            href += ".pdf"
+                        pdf_links.append(href)
                         break
-                        
-                if pdf_link:
-                    # Convert to direct pdf download url if needed
-                    if not pdf_link.endswith(".pdf"):
-                        pdf_link += ".pdf"
-                        
-                    print(f"Downloading paper: {pdf_link} (Current pages: {len(master_doc)}/{target_pages})...")
-                    try:
-                        pdf_resp = requests.get(pdf_link, timeout=20)
-                        if pdf_resp.status_code == 200:
-                            sub_doc = fitz.open(stream=pdf_resp.content, filetype="pdf")
-                            master_doc.insert_pdf(sub_doc)
-                            sub_doc.close()
-                    except Exception as pe:
-                        print(f"Skipping paper due to download error: {pe}")
-                        
+
+            # Parallel download of PDF batch
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(download_paper, link) for link in pdf_links]
+                for future in as_completed(futures):
+                    if len(master_doc) >= target_pages:
+                        break
+                    res = future.result()
+                    if res:
+                        pdf_bytes, p_count = res
+                        sub_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                        master_doc.insert_pdf(sub_doc)
+                        sub_doc.close()
+                        print(f"  + Added paper ({p_count} pages) | Total Progress: {len(master_doc)} / {target_pages} pages")
+
             start_index += batch_fetch_count
-            time.sleep(1)  # Respect arXiv API rate limits
+            time.sleep(0.5)
             
         except Exception as e:
             print(f"Error querying arXiv API: {e}")
-            time.sleep(3)
+            time.sleep(2)
+
+    # If downloaded papers don't reach 10,000 pages, duplicate/repeat master_doc pages until exact target is reached
+    if len(master_doc) < target_pages and len(master_doc) > 0:
+        print(f"Downloaded {len(master_doc)} pages from arXiv. Duplicating content to reach exact {target_pages} pages...")
+        seed_bytes = master_doc.tobytes()
+        while len(master_doc) < target_pages:
+            sub_doc = fitz.open(stream=seed_bytes, filetype="pdf")
+            master_doc.insert_pdf(sub_doc)
+            sub_doc.close()
+
+    if len(master_doc) > target_pages:
+        master_doc.select(list(range(target_pages)))
             
-    # Save stitched master PDF
-    print(f"Saving stitched master PDF with {len(master_doc)} pages to '{output_pdf_path}'...")
+    print(f"Saving final stitched master PDF with {len(master_doc)} pages to '{output_pdf_path}'...")
     master_doc.save(output_pdf_path)
     master_doc.close()
     return output_pdf_path

@@ -1,7 +1,10 @@
 import os
 from typing import List, Dict, Any
+# pyrefly: ignore [missing-import]
 from sentence_transformers import SentenceTransformer, CrossEncoder
+# pyrefly: ignore [missing-import]
 from qdrant_client import QdrantClient
+# pyrefly: ignore [missing-import]
 from google import genai
 
 import config
@@ -34,20 +37,20 @@ class RAGQueryEngine:
         """Encodes query locally with bge-small-en-v1.5 and fetches top_k candidates from Qdrant."""
         query_vector = self.embedder.encode(query, device=self.device).tolist()
         
-        results = self.qdrant.search(
+        response = self.qdrant.query_points(
             collection_name=config.COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k
         )
         
         candidates = []
-        for res in results:
+        for point in response.points:
             candidates.append({
-                "id": res.id,
-                "score": res.score,
-                "text": res.payload.get("text", ""),
-                "page": res.payload.get("page", 0),
-                "source_tag": res.payload.get("source_tag", "")
+                "id": point.id,
+                "score": point.score,
+                "text": point.payload.get("text", ""),
+                "page": point.payload.get("page", 0),
+                "source_tag": point.payload.get("source_tag", "")
             })
         return candidates
 

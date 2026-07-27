@@ -1,5 +1,9 @@
 import os
 import torch
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Device Configuration (MPS for Apple Silicon acceleration with CPU fallback)
 if torch.backends.mps.is_available():

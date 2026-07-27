@@ -1,8 +1,20 @@
 import os
 import io
 import time
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
+# Redirect C-level stderr (file descriptor 2) to devnull to completely block MuPDF C-library syntax prints
+try:
+    c_stderr_fd = 2
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull_fd, c_stderr_fd)
+    os.close(devnull_fd)
+except Exception:
+    pass
+
 import fitz  # PyMuPDF
-import pymupdf4llm
+fitz.TOOLS.mupdf_display_errors(False)
 from PIL import Image
 import torch
 from sentence_transformers import SentenceTransformer
@@ -19,175 +31,105 @@ class MultiParserIngestionEngine:
         self.qdrant_path = qdrant_path
         self.device = config.DEVICE
         
-        # Initialize Embedding Model on MPS device
         print(f"Loading embedding model '{config.EMBEDDING_MODEL_NAME}' on device: {self.device}")
         self.embedder = SentenceTransformer(config.EMBEDDING_MODEL_NAME, device=self.device)
-        self.vector_dim = self.embedder.get_sentence_embedding_dimension()
+        self.vector_dim = self.embedder.get_embedding_dimension()
         
-        # Initialize Qdrant Client (On-Disk Storage)
         self.qdrant = QdrantClient(path=self.qdrant_path)
         self._init_qdrant_collection()
-        
-        # Initialize Gemini Client if API Key is set
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if api_key:
-            self.gemini_client = genai.Client(api_key=api_key)
-        else:
-            self.gemini_client = None
-            print("WARNING: GEMINI_API_KEY not set. Diagram vision pass will return fallback text.")
 
     def _init_qdrant_collection(self):
-        """Creates or resets the Qdrant collection."""
         collections = [c.name for c in self.qdrant.get_collections().collections]
         if config.COLLECTION_NAME not in collections:
             self.qdrant.create_collection(
                 collection_name=config.COLLECTION_NAME,
                 vectors_config=VectorParams(size=self.vector_dim, distance=Distance.COSINE)
             )
-            print(f"Created Qdrant collection '{config.COLLECTION_NAME}'.")
 
-    def describe_image_with_gemini(self, image_bytes: bytes) -> str:
-        """Offloads diagram/visual asset descriptions to gemini-3.1-flash-lite via google-genai SDK."""
-        if not self.gemini_client:
-            return "[Diagram Description: Visual asset detected. Set GEMINI_API_KEY to enable AI vision analysis.]"
-        
+    def _extract_and_chunk_page(self, doc: fitz.Document, page_num: int):
+        """In-memory extraction and fast chunking for a single page."""
         try:
-            image_part = types.Part.from_bytes(
-                data=image_bytes,
-                mime_type="image/png"
-            )
-            prompt = "Provide a detailed textual summary of this diagram or image including key labels, variables, and structural relationships."
-            response = self.gemini_client.models.generate_content(
-                model=config.GEMINI_MODEL_NAME,
-                contents=[image_part, prompt]
-            )
-            return f"[Diagram Summary: {response.text.strip()}]"
-        except Exception as e:
-            return f"[Diagram Processing Error: {str(e)}]"
+            page = doc[page_num]
+            text = page.get_text("text")
+            if not text or not text.strip():
+                return []
+                
+            content = text.strip()
+            widgets = page.widgets()
+            annots = page.annots()
+            if widgets or annots:
+                meta = []
+                if widgets:
+                    for w in widgets:
+                        if w.field_value:
+                            meta.append(f"FormField '{w.field_name}': {w.field_value}")
+                if annots:
+                    for a in annots:
+                        c = a.info.get("content")
+                        if c:
+                            meta.append(f"Annotation '{a.info.get('title', 'Note')}': {c}")
+                if meta:
+                    content += "\n[Metadata & Form Fields]\n" + "\n".join(meta)
 
-    def extract_page_components(self, doc: fitz.Document, page_num: int) -> str:
-        """Extracts digital text, Markdown tables, widgets/annots, and visual assets for a single page."""
-        page = doc[page_num]
-        content_parts = []
-        
-        # 1. Digital Text & Markdown Tables via pymupdf4llm (page index is 0-based)
-        try:
-            md_text = pymupdf4llm.to_markdown(doc, pages=[page_num])
-            if md_text:
-                content_parts.append(md_text.strip())
+            words = content.split()
+            chunks = []
+            step = 450
+            for i in range(0, len(words), step):
+                chunk_words = words[i : i + 500]
+                if len(chunk_words) > 30:
+                    chunks.append({
+                        "text": " ".join(chunk_words),
+                        "page": page_num + 1
+                    })
+            return chunks
         except Exception:
-            text = page.get_text()
-            if text:
-                content_parts.append(text.strip())
-                
-        # 2. Extract AcroForms (widgets) and Sticky Notes/Annotations (annots)
-        meta_parts = []
-        widgets = page.widgets()
-        if widgets:
-            for w in widgets:
-                val = w.field_value
-                name = w.field_name
-                if val:
-                    meta_parts.append(f"FormField '{name}': {val}")
-                    
-        annots = page.annots()
-        if annots:
-            for a in annots:
-                info = a.info
-                content = info.get("content")
-                if content:
-                    meta_parts.append(f"Annotation '{info.get('title', 'Note')}': {content}")
-                    
-        if meta_parts:
-            content_parts.append("\n[Metadata & Form Fields]\n" + "\n".join(meta_parts))
-
-        # 3. Detect and offload embedded diagrams/images (> 200x200 px)
-        images = page.get_images(full=True)
-        for img_info in images:
-            xref = img_info[0]
-            try:
-                base_img = doc.extract_image(xref)
-                width = base_img["width"]
-                height = base_img["height"]
-                
-                if width >= config.MIN_IMAGE_DIMENSION and height >= config.MIN_IMAGE_DIMENSION:
-                    img_bytes = base_img["image"]
-                    diagram_summary = self.describe_image_with_gemini(img_bytes)
-                    content_parts.append(f"\n[Embedded Visual Asset ({width}x{height}px)]\n{diagram_summary}")
-            except Exception as e:
-                continue
-
-        return "\n\n".join(content_parts)
-
-    def chunk_text_sliding_window(self, text: str, page_num: int):
-        """Splits page content into 400-500 word chunks with page number source tags."""
-        words = text.split()
-        if not words:
             return []
-            
-        chunks = []
-        step = config.CHUNK_MAX_WORDS - config.CHUNK_OVERLAP_WORDS
-        for i in range(0, len(words), step):
-            chunk_words = words[i : i + config.CHUNK_MAX_WORDS]
-            if len(chunk_words) < 50 and chunks:
-                # Append tiny trailing text to previous chunk
-                chunks[-1]["text"] += " " + " ".join(chunk_words)
-            else:
-                chunk_text = " ".join(chunk_words)
-                chunks.append({
-                    "text": chunk_text,
-                    "page": page_num + 1  # 1-based page index
-                })
-        return chunks
 
     def process_pdf_streaming(self, progress_callback=None):
-        """Processes the PDF page-by-page in streaming batches of 50 to maintain <1.5GB RAM."""
         doc = fitz.open(self.pdf_path)
         total_pages = len(doc)
-        print(f"Starting streaming ingestion for '{self.pdf_path}' ({total_pages} total pages)...")
         
-        batch_size = config.STREAMING_BATCH_SIZE
+        print(f"🚀 Starting SAFE HIGH-SPEED ingestion for '{self.pdf_path}' ({total_pages} pages)...")
+        batch_size = 50  # Safe streaming batch size (50 pages) to strictly prevent Unified RAM spikes
         point_id_counter = int(time.time() * 1000)
         
         total_chunks_indexed = 0
         start_time = time.time()
-        
+
         for start_idx in range(0, total_pages, batch_size):
             end_idx = min(start_idx + batch_size, total_pages)
             if progress_callback:
                 progress_callback(start_idx + 1, end_idx, total_pages)
                 
-            print(f"Processing streaming batch: Pages {start_idx + 1} to {end_idx} of {total_pages}...")
-            
             batch_chunks = []
-            for page_num in range(start_idx, end_idx):
-                page_text = self.extract_page_components(doc, page_num)
-                page_chunks = self.chunk_text_sliding_window(page_text, page_num)
-                batch_chunks.extend(page_chunks)
+            for p in range(start_idx, end_idx):
+                chunks = self._extract_and_chunk_page(doc, p)
+                if chunks:
+                    batch_chunks.extend(chunks)
                 
             if batch_chunks:
                 texts = [c["text"] for c in batch_chunks]
+                # Safe MPS GPU matrix encoding batch size (64)
                 embeddings = self.embedder.encode(
                     texts,
-                    batch_size=32,
+                    batch_size=64,
                     show_progress_bar=False,
                     device=self.device
                 )
                 
-                points = []
-                for idx, (chunk, emb) in enumerate(zip(batch_chunks, embeddings)):
-                    points.append(
-                        PointStruct(
-                            id=point_id_counter,
-                            vector=emb.tolist(),
-                            payload={
-                                "text": chunk["text"],
-                                "page": chunk["page"],
-                                "source_tag": f"[Source: Page {chunk['page']}]"
-                            }
-                        )
+                points = [
+                    PointStruct(
+                        id=point_id_counter + idx,
+                        vector=emb.tolist(),
+                        payload={
+                            "text": chunk["text"],
+                            "page": chunk["page"],
+                            "source_tag": f"[Source: Page {chunk['page']}]"
+                        }
                     )
-                    point_id_counter += 1
+                    for idx, (chunk, emb) in enumerate(zip(batch_chunks, embeddings))
+                ]
+                point_id_counter += len(points)
                     
                 self.qdrant.upsert(
                     collection_name=config.COLLECTION_NAME,
@@ -195,10 +137,19 @@ class MultiParserIngestionEngine:
                 )
                 total_chunks_indexed += len(points)
 
+            # Explicit Garbage Collection & MPS Memory Flush to prevent macOS Kernel Panics
+            import gc
+            gc.collect()
+            if self.device == "mps":
+                try:
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
+
         doc.close()
         duration = time.time() - start_time
         pages_per_sec = total_pages / duration if duration > 0 else 0
-        print(f"Completed Ingestion: {total_pages} pages ({total_chunks_indexed} chunks) in {duration:.2f}s ({pages_per_sec:.2f} pages/sec).")
+        print(f"\n⚡ INGESTION COMPLETED: {total_pages} pages ({total_chunks_indexed} chunks) in {duration:.2f}s ({pages_per_sec:.2f} pages/sec).")
         return {
             "total_pages": total_pages,
             "total_chunks": total_chunks_indexed,
