@@ -175,14 +175,21 @@ class RAGQueryEngine:
             chunk_content = c.get("parent_text", c.get("text", ""))
             context_blocks.append(f"--- CONTEXT BLOCK {idx} {page_info} ---\n{chunk_content}")
 
-        formatted_context = "\n\n".join(context_blocks)
+        # Integrate Context Compression & Self-RAG Reflection Directives
+        try:
+            from prompt_compressor import PromptCompressorSelfRAG
+            compressor = PromptCompressorSelfRAG()
+            formatted_context = compressor.compress_context_blocks(context_blocks)
+        except Exception:
+            formatted_context = "\n\n".join(context_blocks)
 
         system_prompt = (
             "You are a strict, SOTA production-grade Retrieval-Augmented Generation assistant.\n"
             "Answer ONLY using the provided context blocks. Include inline page citations like [Source: Page X].\n"
             "If the answer cannot be found in the provided context, state clearly: "
             "'I cannot answer this question based on the provided document context.'\n"
-            "DO NOT extrapolate, speculate, or draw on external knowledge."
+            "DO NOT extrapolate, speculate, or draw on external knowledge.\n\n"
+            "SELF-RAG DIRECTIVE: Evaluate your generated claims using reflection markers [Relevant], [Supported], [Utility]."
         )
 
         user_prompt = f"Context Information:\n{formatted_context}\n\nQuestion: {query}"

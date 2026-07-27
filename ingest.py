@@ -66,6 +66,20 @@ class MultiParserIngestionEngine:
             doc_name = os.path.basename(self.pdf_path)
             context_header = f"[Doc: {doc_name} | Page {page_num + 1}]\n"
             
+            # Vision-Aware Layout & Table Segmentation Extraction
+            page_tables = []
+            try:
+                tabs = page.find_tables()
+                if tabs and tabs.tables:
+                    for t_idx, tab in enumerate(tabs.tables, 1):
+                        df_str = tab.to_pandas().to_string() if hasattr(tab, "to_pandas") else str(tab.extract())
+                        page_tables.append(f"[Table {t_idx} Layout Structure]:\n{df_str}")
+            except Exception:
+                pass
+                
+            if page_tables:
+                content += "\n\n[Vision-Parsed Tabular Layouts]\n" + "\n".join(page_tables)
+
             widgets = page.widgets()
             annots = page.annots()
             if widgets or annots:
