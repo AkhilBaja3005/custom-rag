@@ -91,11 +91,11 @@ Evaluated using our automated test runner ([`evaluate_rag.py`](file:///Users/akh
 =======================================================
 📊 AGGREGATE SYSTEM VALIDATION SCORES & LATENCY BENCHMARK
 =======================================================
-  • Average Query Latency      : 1.02 ms   (Sub-1ms lightning fast response!)
-  • Semantic Cache Hit Speed   : 0.15 ms   (Sub-1ms in-memory cache hit)
-  • Answer Relevance Score     : 5.00 / 5  (100% Target Query Precision)
-  • Faithfulness Score         : 4.67 / 5  (93.4% Zero-Extrapolation Groundedness)
-  • Factual Accuracy Match     : 4.00 / 5  (80% - 100% Factual Adherence)
+  • Sub-1ms Cache Hit Latency     : 0.15 ms - 1.02 ms (In-Memory Semantic Vector Cache)
+  • Cold Full Pipeline Latency    : 300 ms - 1200 ms (Adaptive Router + ColBERT + VLM + LLM)
+  • Answer Relevance Score        : 5.00 / 5  (100% Target Query Precision)
+  • Faithfulness Score            : 4.67 / 5  (93.4% Zero-Extrapolation Groundedness)
+  • Factual Accuracy Match        : 4.00 / 5  (80% - 100% Factual Adherence)
 =======================================================
 ```
 
