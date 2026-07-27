@@ -14,11 +14,53 @@ import config
 from query import RAGQueryEngine
 from ingest import MultiParserIngestionEngine
 from qdrant_client import QdrantClient
+from contextlib import asynccontextmanager
+import threading
 
+# ── Singletons & Lock ─────────────────────────────────────────────────────────
+_qdrant_client: Optional[QdrantClient] = None
+_query_engine: Optional[RAGQueryEngine] = None
+_qdrant_lock = threading.Lock()
+
+def get_db_client() -> QdrantClient:
+    global _qdrant_client
+    if _qdrant_client is None:
+        with _qdrant_lock:
+            if _qdrant_client is None:
+                _qdrant_client = QdrantClient(path=config.QDRANT_PATH)
+    return _qdrant_client
+
+def get_engine() -> RAGQueryEngine:
+    global _query_engine
+    if _query_engine is None:
+        _query_engine = RAGQueryEngine(qdrant_client=get_db_client())
+    return _query_engine
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Pre-warm the Qdrant client at startup so every background ingestion
+    thread reuses the same open file handle and never races to open a second
+    lock on qdrant_db."""
+    try:
+        get_db_client()  # opens qdrant_db exactly once
+    except Exception as e:
+        print(f"[WARNING] Qdrant pre-warm failed: {e} — will retry on first request")
+    yield
+    # Graceful shutdown – release the file lock cleanly
+    global _qdrant_client
+    if _qdrant_client is not None:
+        try:
+            _qdrant_client.close()
+        except Exception:
+            pass
+        _qdrant_client = None
+
+# ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="SOTA RAG Engine Microservice API",
     description="High-performance async FastAPI backend with SSE streaming and background ingestion jobs",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 # CORS middleware for Next.js 15 frontend
@@ -29,22 +71,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Lazy-loaded singletons to prevent startup locks
-_qdrant_client: Optional[QdrantClient] = None
-_query_engine: Optional[RAGQueryEngine] = None
-
-def get_db_client() -> QdrantClient:
-    global _qdrant_client
-    if _qdrant_client is None:
-        _qdrant_client = QdrantClient(path=config.QDRANT_PATH)
-    return _qdrant_client
-
-def get_engine() -> RAGQueryEngine:
-    global _query_engine
-    if _query_engine is None:
-        _query_engine = RAGQueryEngine(qdrant_client=get_db_client())
-    return _query_engine
 
 # Ingestion Jobs State Tracker
 INGESTION_JOBS: Dict[str, Dict[str, Any]] = {}
@@ -189,4 +215,8 @@ async def stream_query(query: str, collection_name: str = config.COLLECTION_NAME
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    # No --reload: reload spawns a file-watcher subprocess that races to open
+    # the qdrant_db file lock alongside the main process, causing the
+    # "already accessed by another instance" error.
+    uvicorn.run("api:app", host="0.0.0.0", port=8080, reload=False)
+
